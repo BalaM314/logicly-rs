@@ -1,0 +1,10 @@
+[package]
+name = "logicly-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+flate2 = {version = "1.1.4", features = ["zlib-ng"], default-features = false}
+serde = {version = "1.0.228", features = ["serde_derive"]}
+serde-xml-rs = "0.8.1"
