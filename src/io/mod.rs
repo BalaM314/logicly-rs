@@ -92,8 +92,168 @@ pub struct Location {
 	#[serde(rename = "@uids")]
 	uids: String,
 }
+#[derive(Debug, PartialEq)]
+pub struct Circuit {
+	objects: Vec<Object>,
+}
 
-pub fn parse_xml(input:&str) -> Result<RawCircuit> {
-	serde_xml_rs::from_str(input).map_err(|e| anyhow!(e))
+#[derive(Debug, Eq, PartialEq)]
+pub enum Rotation {
+	Right,
+	Down,
+	Left,
+	Up
+}
+
+impl TryFrom<u16> for Rotation {
+	type Error = String;
+	fn try_from(value: u16) -> Result<Self, Self::Error> {
+		Ok(match value {
+			0 => Rotation::Right,
+			90 => Rotation::Down,
+			180 => Rotation::Left,
+			270 => Rotation::Up,
+			_ => return Err(format!("Unsupported rotation {value}"))
+		})
+	}
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Object {
+	uid: String,
+	x: f64,
+	y: f64,
+	rotation: Rotation,
+	inner: ObjectInner,
+}
+impl TryFrom<RawObject> for Object {
+	type Error = String;
+	fn try_from(value: RawObject) -> Result<Self, Self::Error> {
+		Ok(match &value.kind[..] {
+			"switch@logic.ly" | "push_button@logic.ly" | "constant_high@logic.ly" | "constant_low@logic.ly" => match value {
+				RawObject { kind, uid, x, y, rotation, export_name, outputs, inputs: None, text: None, function_index: None } => Self {
+					uid, x, y,
+					rotation: rotation.try_into()?,
+					inner: ObjectInner::Input {
+						export_name,
+						kind: kind[..].try_into()?,
+						value: match &outputs {
+							Some(str) => match &str[..] {
+								"false" => false, "true" => true,
+								x => return Err(format!("invalid output field in object: expected 'true' or 'false', not {x}"))
+							},
+							None if matches!(&kind[..], "constant_high@logic.ly" | "constant_low@logic.ly") =>
+								kind == "constant_high@logic.ly",
+							None => return Err(format!("Invalid gate"))
+						},
+						connections: vec![],
+					}
+				},
+				_ => return Err(format!("Invalid gate: unexpected property")),
+			},
+			"light_bulb@logic.ly" => match value {
+				RawObject { uid, x, y, rotation, export_name, outputs: None, inputs: None, text: None, function_index: None, kind: _ } => Self {
+					uid, x, y,
+					rotation: rotation.try_into()?,
+					inner: ObjectInner::Output { export_name }
+				},
+				_ => return Err(format!("Invalid light bulb")),
+			},
+			"label@logic.ly" => match value {
+				RawObject { uid, x, y, rotation, export_name: None, outputs: None, inputs: None, text: Some(text), function_index: None, kind: _ } => Self {
+					uid, x, y,
+					rotation: rotation.try_into()?,
+					inner: ObjectInner::Label { text }
+				},
+				_ => return Err(format!("Invalid label")),
+			},
+			"buffer@logic.ly" | "not@logic.ly" |
+			"and@logic.ly" | "nand@logic.ly" |
+			"or@logic.ly" | "nor@logic.ly" |
+			"xor@logic.ly" | "xnor@logic.ly" => match value {
+				RawObject { uid, x, y, rotation, export_name: None, outputs: None, inputs: Some(inputs), text: None, function_index, .. } => Self {
+					uid, x, y,
+					rotation: rotation.try_into()?,
+					inner: ObjectInner::SimpleGate {
+						inputs,
+						connections: vec![],
+						xor_type: match function_index {
+							Some(1) => XorType::One,
+							_ => XorType::Odd,
+						},
+					}
+				},
+				_ => return Err(format!("Invalid label")),
+			},
+			x => return Err(format!("Unsupported object type {x}"))
+		})
+	}
+}
+#[derive(Debug, PartialEq)]
+pub enum ObjectInner {
+	SimpleGate {
+		inputs: u32,
+		xor_type: XorType,
+		connections: Vec<(u32, usize)>,
+	},
+	Output {
+		export_name: Option<String>,
+	},
+	Input {
+		export_name: Option<String>,
+		kind: InputType,
+		value: bool,
+		connections: Vec<(u32, usize)>,
+	},
+	Label {
+		text: String,
+	},
+}
+#[derive(Debug, Eq, PartialEq)]
+pub enum InputType {
+	Switch, Button, True, False
+}
+impl TryFrom<&str> for InputType {
+	type Error = String;
+	fn try_from(value: &str) -> Result<Self, Self::Error> {
+		Ok(match value {
+			"switch@logic.ly" => Self::Switch,
+			"push_button@logic.ly" => Self::Button,
+			"constant_high@logic.ly => " => Self::True,
+			"constant_low@logic.ly" => Self::False,
+			_ => return Err(String::from("invalid type"))
+		})
+	}
+}
+#[derive(Debug, Eq, PartialEq)]
+pub enum XorType {
+	Odd, One
+}
+impl TryFrom<RawCircuit> for Circuit {
+	type Error = String;
+	fn try_from(value: RawCircuit) -> Result<Self, Self::Error> {
+		let mut objects = value.objects.into_iter()
+			.map(|o| Object::try_from(o))
+			.collect::<Result<Vec<_>, String>>()?;
+		let uid_to_index: HashMap::<String, usize> = objects.iter().enumerate().map(|(i, o)| (o.uid.clone(), i)).collect();
+		for obj in &value.connections {
+			let output = *uid_to_index.get(&obj.output_uid)
+				.ok_or(String::from("UUID does not correspond to any known object"))?;
+			let input = *uid_to_index.get(&obj.input_uid)
+				.ok_or(String::from("UUID does not correspond to any known object"))?;
+			match &mut objects[output].inner {
+				ObjectInner::SimpleGate { connections, .. } | ObjectInner::Input { connections, .. } =>
+					connections.push((obj.input_index, input)),
+				ObjectInner::Output {..} | ObjectInner::Label {..} =>
+					return Err(String::from("Invalid connection: cannot connect an output or a label to something else")),
+			}
+		}
+		Ok(Self { objects })
+	}
+}
+
+pub fn parse_xml(input:&str) -> Result<Circuit> {
+	let raw: RawCircuit = serde_xml_rs::from_str(input)?;
+	Circuit::try_from(raw).map_err(|e| anyhow!(e))
 }
 
