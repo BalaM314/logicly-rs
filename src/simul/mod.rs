@@ -1,5 +1,4 @@
 use std::{collections::HashMap, ops::Deref};
-
 use crate::io::{Circuit, InputType, Object, ObjectInner, SimpleGateType, XorType};
 
 
@@ -51,6 +50,66 @@ impl Simulation {
 	pub fn update_until_done(&mut self, limit: u128){
 		for _ in 1..limit {
 			if !self.update_all_once() { break }
+		}
+	}
+	/// Sets all non-constant objects to false.
+	pub fn reset_state(&mut self){
+		for obj in &mut self.objects {
+			for val in &mut obj.values { *val = false; }
+		}
+	}
+	/// Resets the state, then finds the outputs of this simulation given some inputs.
+	pub fn get_outputs(&mut self, inputs: &HashMap<&str, bool>, limit: u128) -> HashMap<String, bool> {
+		self.reset_state();
+		for obj in &mut self.objects {
+			match &mut obj.object.inner {
+				ObjectInner::Input {
+					export_name: Some(name),
+					kind: InputType::Button | InputType::Switch,
+					..
+				} => {
+					if let Some(&val) = inputs.get(&name[..]) {
+						obj.values[0] = val;
+					}
+				},
+				_ => {}
+			}
+		}
+		self.update_until_done(limit);
+		self.objects.iter().flat_map(|f| match &f.inner {
+			ObjectInner::Output { export_name: Some(name), .. } => Some((name.clone(), f.values[0])),
+			_ => None
+		}).collect()
+	}
+	pub fn print_truth_table(&mut self, limit: u128){
+		let mut input_names: Vec<_> = self.objects.iter().flat_map(|o| match &o.inner {
+			ObjectInner::Input { export_name: Some(name), .. } => Some(name.clone()),
+			_ => None,
+		}).collect();
+		input_names.sort();
+		let mut output_names: Vec<_> = self.objects.iter().flat_map(|o| match &o.inner {
+			ObjectInner::Output { export_name: Some(name), .. } => Some(name.clone()),
+			_ => None,
+		}).collect();
+		output_names.sort();
+		let mut inputs: HashMap<_, _> = input_names.iter().map(|w| (&w[..], false)).collect();
+		let header = input_names.iter().chain(output_names.iter()).map(|s| &s[..]).collect::<Vec<_>>();
+		let header_str = header.join("|");
+		println!("{}", header_str);
+		println!("{}", "-".repeat(header_str.len()));
+		for i in 0..2u32.pow(input_names.len() as u32) {
+			for (bit, input) in input_names.iter().rev().enumerate() {
+				let value = (i >> bit) & 1 == 1;
+				inputs.insert(&input[..], value);	
+			}
+			let outputs = self.get_outputs(&inputs, limit);
+			let line = input_names.iter().map(|inp| inputs.get(&inp[..]).unwrap()).chain(
+				output_names.iter().map(|out| outputs.get(&out[..]).unwrap())
+			).enumerate().map(|(i, val)| format!("{:^width$}", match val {
+				true => "T",
+				false => "F"
+			}, width = header[i].len())).collect::<Vec<_>>().join("|");
+			println!("{line}");
 		}
 	}
 	fn get_values(connections: &Vec<Option<(u32, usize)>>, objects: &Vec<SObject>) -> Vec<bool> {
