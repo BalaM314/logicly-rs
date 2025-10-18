@@ -79,10 +79,10 @@ pub struct CustomCircuitData {
 	objects: Vec<RawObject>,
 	#[serde(rename = "connection")]
 	connections: Vec<RawConnection>,
-	#[serde(rename = "setting")]
+	#[serde(rename = "location")]
 	locations: Vec<Location>,
 	#[serde(rename = "custom")]
-	customs: Vec<CustomCircuitWrapper>,
+	customs: Option<Vec<CustomCircuitWrapper>>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -217,6 +217,7 @@ pub enum ObjectInner {
 	Input {
 		export_name: Option<String>,
 		kind: InputType,
+		/// unused
 		value: bool,
 	},
 	Label {

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::{Context, Result, anyhow};
 use std::{env::args, fs::File, io::Read};
 
@@ -16,32 +17,11 @@ fn main() -> Result<()> {
 		.read_to_string(&mut decompressed)
 		.context("Error decompressing file")?;
 	let parsed = parse_xml(&decompressed)?;
-	println!("{parsed:?}");
+	// println!("{parsed:?}");
 	let mut simul: Simulation = parsed.into();
 
-	let mut inputs = simul.get_inputs_mut();
-	**inputs.get_mut("x").unwrap() = false;
-	**inputs.get_mut("y").unwrap() = false;
-	simul.update_until_done(100);
-	simul.print_outputs();
+	// simul.get_outputs(HashMap::from_iter([("x", false), ("y", false)].into_iter()), 100);
+	simul.print_truth_table(1000);
 
-	let mut inputs = simul.get_inputs_mut();
-	**inputs.get_mut("x").unwrap() = true;
-	**inputs.get_mut("y").unwrap() = false;
-	simul.update_until_done(100);
-	simul.print_outputs();
-
-	let mut inputs = simul.get_inputs_mut();
-	**inputs.get_mut("x").unwrap() = false;
-	**inputs.get_mut("y").unwrap() = true;
-	simul.update_until_done(100);
-	simul.print_outputs();
-
-	let mut inputs = simul.get_inputs_mut();
-	**inputs.get_mut("x").unwrap() = true;
-	**inputs.get_mut("y").unwrap() = true;
-	simul.update_until_done(100);
-	simul.print_outputs();
-	
 	Ok(())
 }
