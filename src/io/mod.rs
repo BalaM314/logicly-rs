@@ -96,6 +96,14 @@ pub struct Location {
 pub struct Circuit {
 	pub objects: Vec<Object>,
 }
+impl Display for Circuit {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		for (i, obj) in self.objects.iter().enumerate() {
+			writeln!(f, "({i}) {obj}")?;
+		}
+		Ok(())
+	}
+}
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Rotation {
@@ -135,6 +143,23 @@ impl Object {
 		match &self.inner {
 			ObjectInner::Output { export_name, .. } | ObjectInner::Input { export_name, .. } => export_name.as_ref().unwrap_or(&self.uid),
 			_ => panic!("Not an Output or Input")
+		}
+	}
+}
+impl Display for Object {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		fn print_connections(connections: &Vec<Option<(u32, usize)>>) -> String {
+			connections.iter().map(|x| match x {
+				Some((ind, ptr)) if *ind == 0 => format!("{ptr}"),
+				Some((ind, ptr)) => format!("{ptr}#{ind}"),
+				None => format!("NUL")
+			}).collect::<Vec<_>>().join(", ")
+		}
+		match &self.inner {
+			ObjectInner::SimpleGate { kind, connections, .. } => write!(f, "Gate {kind} [{}]", print_connections(connections)),
+			ObjectInner::Output { export_name, connections } => write!(f, "Output({}) {}", export_name.clone().unwrap_or("?".to_string()), print_connections(connections)),
+			ObjectInner::Input { export_name, kind, value } => write!(f, "Input({}) {kind} {value}", export_name.clone().unwrap_or("?".to_string())),
+			ObjectInner::Label { text } => write!(f, "Label: {text}"),
 		}
 	}
 }
@@ -236,7 +261,17 @@ impl TryFrom<&str> for InputType {
 			"push_button@logic.ly" => Self::Button,
 			"constant_high@logic.ly => " => Self::True,
 			"constant_low@logic.ly" => Self::False,
-			_ => return Err(String::from("invalid type"))
+			_ => return Err(format!("invalid type {value}"))
+		})
+	}
+}
+impl Display for InputType {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", match self {
+			InputType::Switch => "Switch",
+			InputType::Button => "Button",
+			InputType::True => "True",
+			InputType::False => "False",
 		})
 	}
 }
@@ -261,6 +296,20 @@ impl TryFrom<&str> for SimpleGateType {
 			"xor@logic.ly" => S::Xor,
 			"xnor@logic.ly" => S::Xnor,
 			_ => return Err(format!("invalid type for simple gate: {value}"))
+		})
+	}
+}
+impl Display for SimpleGateType {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", match self {
+			SimpleGateType::Buffer => "Buffer",
+			SimpleGateType::Not => "Not",
+			SimpleGateType::And => "And",
+			SimpleGateType::Nand => "Nand",
+			SimpleGateType::Or => "Or",
+			SimpleGateType::Nor => "Nor",
+			SimpleGateType::Xor => "Xor",
+			SimpleGateType::Xnor => "Xnor",
 		})
 	}
 }

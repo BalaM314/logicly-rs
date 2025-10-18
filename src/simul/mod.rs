@@ -119,6 +119,14 @@ impl Simulation {
 		}).collect()
 	}
 }
+impl Display for Simulation {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		for (i, obj) in self.objects.iter().enumerate() {
+			writeln!(f, "({i}) {} | {:?}", obj.object, obj.values)?;
+		}
+		Ok(())
+	}
+}
 #[derive(Debug, PartialEq)]
 pub struct SObject {
 	object: Object,
