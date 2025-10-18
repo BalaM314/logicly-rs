@@ -94,7 +94,7 @@ pub struct Location {
 }
 #[derive(Debug, PartialEq)]
 pub struct Circuit {
-	objects: Vec<Object>,
+	pub objects: Vec<Object>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -124,7 +124,19 @@ pub struct Object {
 	x: f64,
 	y: f64,
 	rotation: Rotation,
-	inner: ObjectInner,
+	pub inner: ObjectInner,
+}
+impl Object {
+	pub fn is_output(&self) -> bool {
+		matches!(self.inner, ObjectInner::Output { .. })
+	}
+	/// Must be an Output or Input
+	pub fn export_name_or_uid(&self) -> &str {
+		match &self.inner {
+			ObjectInner::Output { export_name, .. } | ObjectInner::Input { export_name, .. } => export_name.as_ref().unwrap_or(&self.uid),
+			_ => panic!("Not an Output or Input")
+		}
+	}
 }
 impl TryFrom<RawObject> for Object {
 	type Error = String;
@@ -146,16 +158,18 @@ impl TryFrom<RawObject> for Object {
 								kind == "constant_high@logic.ly",
 							None => return Err(format!("Invalid gate"))
 						},
-						connections: vec![],
 					}
 				},
 				_ => return Err(format!("Invalid gate: unexpected property")),
 			},
-			"light_bulb@logic.ly" => match value {
+			"light_bulb@logic.ly" | "digit@logic.ly" => match value {
 				RawObject { uid, x, y, rotation, export_name, outputs: None, inputs: None, text: None, function_index: None, kind: _ } => Self {
 					uid, x, y,
 					rotation: rotation.try_into()?,
-					inner: ObjectInner::Output { export_name }
+					inner: ObjectInner::Output {
+						export_name,
+						connections: vec![None; if value.kind == "light_bulb@logic.ly" { 1 } else { 4 }],
+					}
 				},
 				_ => return Err(format!("Invalid light bulb")),
 			},
@@ -171,12 +185,12 @@ impl TryFrom<RawObject> for Object {
 			"and@logic.ly" | "nand@logic.ly" |
 			"or@logic.ly" | "nor@logic.ly" |
 			"xor@logic.ly" | "xnor@logic.ly" => match value {
-				RawObject { uid, x, y, rotation, export_name: None, outputs: None, inputs: Some(inputs), text: None, function_index, .. } => Self {
+				RawObject { uid, x, y, kind, rotation, export_name: None, outputs: None, inputs: Some(inputs), text: None, function_index } => Self {
 					uid, x, y,
 					rotation: rotation.try_into()?,
 					inner: ObjectInner::SimpleGate {
-						inputs,
-						connections: vec![],
+						connections: vec![None; inputs as usize],
+						kind: kind[..].try_into()?,
 						xor_type: match function_index {
 							Some(1) => XorType::One,
 							_ => XorType::Odd,
@@ -192,18 +206,18 @@ impl TryFrom<RawObject> for Object {
 #[derive(Debug, PartialEq)]
 pub enum ObjectInner {
 	SimpleGate {
-		inputs: u32,
 		xor_type: XorType,
-		connections: Vec<(u32, usize)>,
+		kind: SimpleGateType,
+		connections: Vec<Option<(u32, usize)>>,
 	},
 	Output {
 		export_name: Option<String>,
+		connections: Vec<Option<(u32, usize)>>,
 	},
 	Input {
 		export_name: Option<String>,
 		kind: InputType,
 		value: bool,
-		connections: Vec<(u32, usize)>,
 	},
 	Label {
 		text: String,
@@ -226,6 +240,30 @@ impl TryFrom<&str> for InputType {
 	}
 }
 #[derive(Debug, Eq, PartialEq)]
+pub enum SimpleGateType {
+	Buffer, Not,
+	And, Nand,
+	Or, Nor,
+	Xor, Xnor,
+}
+impl TryFrom<&str> for SimpleGateType {
+	type Error = String;
+	fn try_from(value: &str) -> Result<Self, Self::Error> {
+		use SimpleGateType as S;
+		Ok(match value {
+			"buffer@logic.ly" => S::Buffer,
+			"not@logic.ly" => S::Not,
+			"and@logic.ly" => S::And,
+			"nand@logic.ly" => S::Nand,
+			"or@logic.ly" => S::Or,
+			"nor@logic.ly" => S::Nor,
+			"xor@logic.ly" => S::Xor,
+			"xnor@logic.ly" => S::Xnor,
+			_ => return Err(format!("invalid type for simple gate: {value}"))
+		})
+	}
+}
+#[derive(Debug, Eq, PartialEq)]
 pub enum XorType {
 	Odd, One
 }
@@ -241,10 +279,10 @@ impl TryFrom<RawCircuit> for Circuit {
 				.ok_or(String::from("UUID does not correspond to any known object"))?;
 			let input = *uid_to_index.get(&obj.input_uid)
 				.ok_or(String::from("UUID does not correspond to any known object"))?;
-			match &mut objects[output].inner {
-				ObjectInner::SimpleGate { connections, .. } | ObjectInner::Input { connections, .. } =>
-					connections.push((obj.input_index, input)),
-				ObjectInner::Output {..} | ObjectInner::Label {..} =>
+			match &mut objects[input].inner {
+				ObjectInner::SimpleGate { connections, .. } | ObjectInner::Output { connections, .. } =>
+					connections[obj.input_index as usize] = Some((obj.output_index, output)),
+				ObjectInner::Input {..} | ObjectInner::Label {..} =>
 					return Err(String::from("Invalid connection: cannot connect an output or a label to something else")),
 			}
 		}
