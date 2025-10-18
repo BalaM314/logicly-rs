@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize};
@@ -259,7 +259,7 @@ impl TryFrom<&str> for InputType {
 		Ok(match value {
 			"switch@logic.ly" => Self::Switch,
 			"push_button@logic.ly" => Self::Button,
-			"constant_high@logic.ly => " => Self::True,
+			"constant_high@logic.ly" => Self::True,
 			"constant_low@logic.ly" => Self::False,
 			_ => return Err(format!("invalid type {value}"))
 		})

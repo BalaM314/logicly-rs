@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Deref};
+use std::{collections::HashMap, fmt::Display, ops::Deref};
 use crate::io::{Circuit, InputType, Object, ObjectInner, SimpleGateType, XorType};
 
 
@@ -55,7 +55,13 @@ impl Simulation {
 	/// Sets all non-constant objects to false.
 	pub fn reset_state(&mut self){
 		for obj in &mut self.objects {
-			for val in &mut obj.values { *val = false; }
+			match obj.inner {
+				ObjectInner::Input { kind: InputType::Button | InputType::Switch, .. }
+				| ObjectInner::SimpleGate { .. } | ObjectInner::Output { .. } => {
+					for val in &mut obj.values { *val = false; }
+				},
+				_ => continue,
+			}
 		}
 	}
 	/// Resets the state, then finds the outputs of this simulation given some inputs.
@@ -146,10 +152,10 @@ impl SObject {
 					S::Nand => !inputs.iter().all(|x| *x),
 					S::Or => inputs.iter().any(|x| *x),
 					S::Nor => !inputs.iter().any(|x| *x),
-					S::Xor | S::Xnor => match xor_type {
+					S::Xor | S::Xnor => (match xor_type {
 						XorType::Odd => inputs.iter().filter(|x| **x).count() % 2 == 1,
 						XorType::One => inputs.iter().filter(|x| **x).count() == 1,
-					},
+					} == (*kind == S::Xor)),
 				}])
 			},
 			crate::io::ObjectInner::Output { connections, .. } =>
@@ -174,9 +180,13 @@ impl From<Object> for SObject {
 			ObjectInner::Input { .. } => 1,
 			ObjectInner::Label { .. } => 0,
 		};
+		let value = match &object.inner {
+			ObjectInner::Input { value, .. } => *value,
+			_ => false,
+		};
 		Self {
 			object,
-			values: vec![false; values],
+			values: vec![value; values],
 		}
 	}
 }

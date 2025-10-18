@@ -17,8 +17,9 @@ fn main() -> Result<()> {
 		.read_to_string(&mut decompressed)
 		.context("Error decompressing file")?;
 	let parsed = parse_xml(&decompressed)?;
-	// println!("{parsed:?}");
+	// println!("{parsed}");
 	let mut simul: Simulation = parsed.into();
+	// println!("{simul}");
 
 	// simul.get_outputs(HashMap::from_iter([("x", false), ("y", false)].into_iter()), 100);
 	simul.print_truth_table(1000);
