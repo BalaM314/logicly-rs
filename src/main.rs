@@ -16,6 +16,7 @@ fn main() -> Result<()> {
 	flate2::read::DeflateDecoder::new(file)
 		.read_to_string(&mut decompressed)
 		.context("Error decompressing file")?;
+	println!("{}", decompressed);
 	let parsed = parse_xml(&decompressed)?;
 	// println!("{parsed}");
 	let mut simul: Simulation = parsed.into();

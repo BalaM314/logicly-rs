@@ -69,20 +69,24 @@ pub struct Setting {
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct CustomCircuitWrapper {
+	#[serde(rename = "@name")]
+	name: String,
+	#[serde(rename = "@type")]
+	uid: String,
+	#[serde(rename = "@label")]
+	label: String,
 	#[serde(rename = "logicly")]
-	inner: CustomCircuitData,
+	inner: RawCustomCircuit,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-pub struct CustomCircuitData {
+pub struct RawCustomCircuit {
 	#[serde(rename = "object")]
 	objects: Vec<RawObject>,
 	#[serde(rename = "connection")]
 	connections: Vec<RawConnection>,
 	#[serde(rename = "location")]
 	locations: Vec<Location>,
-	#[serde(rename = "custom")]
-	customs: Option<Vec<CustomCircuitWrapper>>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -95,6 +99,28 @@ pub struct Location {
 #[derive(Debug, PartialEq)]
 pub struct Circuit {
 	pub objects: Vec<Object>,
+	customs: Option<Vec<CustomCircuit>>,
+}
+impl Circuit {
+	fn process_objects(objects: Vec<RawObject>, connections: Vec<RawConnection>) -> Result<Vec<Object>, String> {
+		let mut objects = objects.into_iter()
+			.map(|o| Object::try_from(o))
+			.collect::<Result<Vec<_>, String>>()?;
+		let uid_to_index: HashMap::<String, usize> = objects.iter().enumerate().map(|(i, o)| (o.uid.clone(), i)).collect();
+		for obj in connections {
+			let output = *uid_to_index.get(&obj.output_uid)
+				.ok_or(String::from("UUID does not correspond to any known object"))?;
+			let input = *uid_to_index.get(&obj.input_uid)
+				.ok_or(String::from("UUID does not correspond to any known object"))?;
+			match &mut objects[input].inner {
+				ObjectInner::SimpleGate { connections, .. } | ObjectInner::Output { connections, .. } =>
+					connections[obj.input_index as usize] = Some((obj.output_index, output)),
+				ObjectInner::Input {..} | ObjectInner::Label {..} =>
+					return Err(String::from("Invalid connection: cannot connect an output or a label to something else")),
+			}
+		}
+		Ok(objects)
+	}
 }
 impl Display for Circuit {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -102,6 +128,25 @@ impl Display for Circuit {
 			writeln!(f, "({i}) {obj}")?;
 		}
 		Ok(())
+	}
+}
+
+#[derive(Debug, PartialEq)]
+pub struct CustomCircuit {
+	pub objects: Vec<Object>,
+	name: String,
+	uid: String,
+	label: String,
+	locations: Vec<Location>,
+}
+
+impl TryFrom<CustomCircuitWrapper> for CustomCircuit {
+	type Error = String;
+	fn try_from(CustomCircuitWrapper { name, uid, label, inner: RawCustomCircuit { objects, connections, locations } }: CustomCircuitWrapper) -> Result<Self, Self::Error> {
+		Ok(Self {
+			name, uid, label, locations,
+			objects: Circuit::process_objects(objects, connections)?,
+		})
 	}
 }
 
@@ -319,24 +364,15 @@ pub enum XorType {
 }
 impl TryFrom<RawCircuit> for Circuit {
 	type Error = String;
-	fn try_from(value: RawCircuit) -> Result<Self, Self::Error> {
-		let mut objects = value.objects.into_iter()
-			.map(|o| Object::try_from(o))
-			.collect::<Result<Vec<_>, String>>()?;
-		let uid_to_index: HashMap::<String, usize> = objects.iter().enumerate().map(|(i, o)| (o.uid.clone(), i)).collect();
-		for obj in &value.connections {
-			let output = *uid_to_index.get(&obj.output_uid)
-				.ok_or(String::from("UUID does not correspond to any known object"))?;
-			let input = *uid_to_index.get(&obj.input_uid)
-				.ok_or(String::from("UUID does not correspond to any known object"))?;
-			match &mut objects[input].inner {
-				ObjectInner::SimpleGate { connections, .. } | ObjectInner::Output { connections, .. } =>
-					connections[obj.input_index as usize] = Some((obj.output_index, output)),
-				ObjectInner::Input {..} | ObjectInner::Label {..} =>
-					return Err(String::from("Invalid connection: cannot connect an output or a label to something else")),
+	fn try_from(RawCircuit { connections, customs, objects, .. }: RawCircuit) -> Result<Self, Self::Error> {
+		let objects = Circuit::process_objects(objects, connections)?;
+		Ok(Self {
+			objects,
+			customs: match customs {
+				Some(c) => Some(c.into_iter().map(CustomCircuit::try_from).collect::<Result<_, _>>()?),
+				None => None,
 			}
-		}
-		Ok(Self { objects })
+		})
 	}
 }
 
@@ -344,4 +380,3 @@ pub fn parse_xml(input:&str) -> Result<Circuit> {
 	let raw: RawCircuit = serde_xml_rs::from_str(input)?;
 	Circuit::try_from(raw).map_err(|e| anyhow!(e))
 }
-
