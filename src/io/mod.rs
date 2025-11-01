@@ -150,7 +150,7 @@ impl TryFrom<CustomCircuitWrapper> for CustomCircuit {
 	}
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Rotation {
 	Right,
 	Down,
@@ -171,7 +171,7 @@ impl TryFrom<u16> for Rotation {
 	}
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Object {
 	uid: String,
 	x: f64,
@@ -273,7 +273,7 @@ impl TryFrom<RawObject> for Object {
 		})
 	}
 }
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ObjectInner {
 	SimpleGate {
 		xor_type: XorType,
@@ -294,7 +294,7 @@ pub enum ObjectInner {
 		text: String,
 	},
 }
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InputType {
 	Switch, Button, True, False
 }
@@ -320,7 +320,7 @@ impl Display for InputType {
 		})
 	}
 }
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SimpleGateType {
 	Buffer, Not,
 	And, Nand,
@@ -358,7 +358,7 @@ impl Display for SimpleGateType {
 		})
 	}
 }
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum XorType {
 	Odd, One
 }

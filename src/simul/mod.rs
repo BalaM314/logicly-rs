@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display, ops::Deref};
 use crate::io::{Circuit, InputType, Object, ObjectInner, SimpleGateType, XorType};
 
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Simulation {
 	objects: Vec<SObject>,
 }
@@ -133,7 +133,7 @@ impl Display for Simulation {
 		Ok(())
 	}
 }
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SObject {
 	object: Object,
 	values: Vec<bool>,
