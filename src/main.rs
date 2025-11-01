@@ -6,6 +6,7 @@ use crate::{io::parse_xml, simul::Simulation};
 
 mod io;
 mod simul;
+mod util;
 
 fn main() -> Result<()> {
 	let arg = args()
