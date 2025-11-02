@@ -1,17 +1,36 @@
 use std::{collections::HashMap, fmt::Display, ops::Deref};
-use crate::io::{Circuit, InputType, Object, ObjectInner, SimpleGateType, XorType};
+use crate::{io::{Circuit, InputType, Object, ObjectInner, SimpleGateType, XorType}, util::*};
 
+type CustomCircuitMap = HashMap<String, (Simulation, Option<Vec<Box<[bool]>>>)>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Simulation {
 	objects: Vec<SObject>,
+	customs: CustomCircuitMap,
 }
 impl From<Circuit> for Simulation {
 	fn from(value: Circuit) -> Self {
-		Self { objects: value.objects.into_iter().map(SObject::from).collect() }
+		let customs_list = value.customs.unwrap_or_else(|| vec![]);
+		let mut customs:CustomCircuitMap = HashMap::with_capacity(customs_list.len());
+		for custom in customs_list {
+			let mut simulation = Simulation::from(custom.objects, customs.clone());
+			let truth_table = if simulation.inputs_mut().count() > 20 { None }
+			else { simulation.get_truth_table(100) }; //todo! magic
+			customs.insert(custom.uid, (simulation, truth_table));
+		}
+		Self {
+			objects: value.objects.into_iter().map(SObject::from).collect(),
+			customs
+		}
 	}
 }
 impl Simulation {
+	fn from(objects: Vec<Object>, customs: CustomCircuitMap) -> Self {
+		Self {
+			objects: objects.into_iter().map(SObject::from).collect(),
+			customs,
+		}
+	}
 	pub fn print_outputs(&self){
 		for obj in &self.objects {
 			if obj.is_output() || matches!(obj.object.inner, ObjectInner::Input { .. }) {
@@ -52,7 +71,7 @@ impl Simulation {
 		let mut changed = false;
 		for i in 0..self.objects.len() {
 			let obj = &self.objects[i];
-			if let Some(new_val) = obj.get_new_value(&self.objects) {
+			if let Some(new_val) = obj.get_new_value(&self.objects, &mut self.customs) {
 				if new_val != self.objects[i].values { changed = true }
 				self.objects[i].values = new_val;
 			}
@@ -99,6 +118,21 @@ impl Simulation {
 			_ => None
 		}).collect()
 	}
+	/// Returns None if the circuit fails to stabilize for any combination of inputs.
+	pub fn get_truth_table(&mut self, cycle_limit: u128) -> Option<Vec<Box<[bool]>>> {
+		let len = self.inputs_mut().count();
+		(0..2u32.pow(len as u32)).map(|row_index| {
+			self.reset_state();
+			for (bit, obj) in self.inputs_mut().enumerate() {
+				obj.values[0] = (row_index >> bit) & 1 == 1;
+			}
+			self.update_until_done(cycle_limit);
+			Some(self.objects.iter().flat_map(|f| match &f.inner {
+				ObjectInner::Output { export_name: Some(_), .. } => Some(f.values[0]),
+				_ => None
+			}).collect())
+		}).collect()
+	}
 	pub fn print_truth_table(&mut self, limit: u128){
 		let mut input_names: Vec<_> = self.objects.iter().flat_map(|o| match &o.inner {
 			ObjectInner::Input { export_name: Some(name), .. } => Some(name.clone()),
@@ -116,8 +150,8 @@ impl Simulation {
 		println!("{}", header_str);
 		println!("{}", "-".repeat(header_str.len()));
 		for i in 0..2u32.pow(input_names.len() as u32) {
-			for (bit, input) in input_names.iter().rev().enumerate() {
-				let value = (i >> bit) & 1 == 1;
+			for (bit_n, input) in input_names.iter().rev().enumerate() {
+				let value = (i >> bit_n) & 1 == 1;
 				inputs.insert(&input[..], value);	
 			}
 			let outputs = self.get_outputs(&inputs, limit);
@@ -150,9 +184,29 @@ pub struct SObject {
 	object: Object,
 	values: Vec<bool>,
 }
+impl From<Object> for SObject {
+	fn from(object: Object) -> Self {
+		let values = match &object.inner {
+			// For now all gates have only 1 output
+			ObjectInner::SimpleGate { .. } => 1,
+			ObjectInner::CustomGate { num_outputs, .. } => *num_outputs as usize,
+			ObjectInner::Output { .. } => 1,
+			ObjectInner::Input { .. } => 1,
+			ObjectInner::Label { .. } => 0,
+		};
+		let value = match &object.inner {
+			&ObjectInner::Input { value, .. } => value,
+			_ => false,
+		};
+		Self {
+			object,
+			values: vec![value; values],
+		}
+	}
+}
 impl SObject {
 	/// Returns None if the object does not support updating.
-	fn get_new_value(&self, objects: &Vec<SObject>) -> Option<Vec<bool>> {
+	fn get_new_value(&self, objects: &Vec<SObject>, customs:&mut CustomCircuitMap) -> Option<Vec<bool>> {
 		use SimpleGateType as S;
 		return match &self.object.inner {
 			ObjectInner::SimpleGate { xor_type, kind, connections } => {
@@ -170,6 +224,17 @@ impl SObject {
 					} == (*kind == S::Xor)),
 				}])
 			},
+			ObjectInner::CustomGate { uuid, connections, .. } => Some({
+				let inputs = Simulation::get_values(connections, objects);
+				let (custom, table) = customs.get_mut(uuid).expect("unreachable, the uuid was checked to determine num outputs");
+				match table {
+					Some(table) => {
+						let packed_inputs = bits_to_int(inputs.iter());
+						table[packed_inputs].to_vec()
+					},
+					None => todo!(),
+				}
+			}),
 			crate::io::ObjectInner::Output { connections, .. } =>
 				Some(Simulation::get_values(connections, objects)),
 			ObjectInner::Input { .. } => None, // Inputs do not change themselves
@@ -183,24 +248,3 @@ impl Deref for SObject {
 		&self.object
 	}
 }
-impl From<Object> for SObject {
-	fn from(object: Object) -> Self {
-		let values = match &object.inner {
-			// For now all gates have only 1 output
-			ObjectInner::SimpleGate { .. } => 1,
-			ObjectInner::Output { .. } => 1,
-			ObjectInner::Input { .. } => 1,
-			ObjectInner::Label { .. } => 0,
-		};
-		let value = match &object.inner {
-			ObjectInner::Input { value, .. } => *value,
-			_ => false,
-		};
-		Self {
-			object,
-			values: vec![value; values],
-		}
-	}
-}
-
-
