@@ -99,7 +99,7 @@ pub struct Location {
 #[derive(Debug, PartialEq)]
 pub struct Circuit {
 	pub objects: Vec<Object>,
-	customs: Option<Vec<CustomCircuit>>,
+	pub customs: Option<Vec<CustomCircuit>>,
 }
 impl Circuit {
 	fn process_objects(objects: Vec<RawObject>, connections: Vec<RawConnection>) -> Result<Vec<Object>, String> {
@@ -134,10 +134,10 @@ impl Display for Circuit {
 #[derive(Debug, PartialEq)]
 pub struct CustomCircuit {
 	pub objects: Vec<Object>,
-	name: String,
-	uid: String,
-	label: String,
-	locations: Vec<Location>,
+	pub name: String,
+	pub uid: String,
+	pub label: String,
+	pub locations: Vec<Location>,
 }
 
 impl TryFrom<CustomCircuitWrapper> for CustomCircuit {
@@ -182,6 +182,12 @@ pub struct Object {
 impl Object {
 	pub fn is_output(&self) -> bool {
 		matches!(self.inner, ObjectInner::Output { .. })
+	}
+	pub fn is_named_output(&self) -> bool {
+		matches!(self.inner, ObjectInner::Output { export_name: Some(_), .. })
+	}
+	pub fn is_named_input(&self) -> bool {
+		matches!(self.inner, ObjectInner::Input { export_name: Some(_), .. })
 	}
 	/// Must be an Output or Input
 	pub fn export_name_or_uid(&self) -> &str {
@@ -249,7 +255,7 @@ impl TryFrom<RawObject> for Object {
 					rotation: rotation.try_into()?,
 					inner: ObjectInner::Label { text }
 				},
-				_ => return Err(format!("Invalid label")),
+				_ => return Err(format!("Invalid label: attributes are invalid")),
 			},
 			"buffer@logic.ly" | "not@logic.ly" |
 			"and@logic.ly" | "nand@logic.ly" |
