@@ -35,6 +35,18 @@ impl Simulation {
 		}
 		map
 	}
+	pub fn inputs_mut(&mut self) -> impl Iterator<Item = &mut SObject> {
+		self.objects.iter_mut().flat_map(|o| match &mut o.object.inner {
+			ObjectInner::Input { export_name: Some(_), .. } => Some(o),
+			_ => None
+		})
+	}
+	pub fn outputs(&self) -> impl Iterator<Item = &SObject> {
+		self.objects.iter().flat_map(|o| match &o.object.inner {
+			ObjectInner::Output { export_name: Some(_), .. } => Some(o),
+			_ => None
+		})
+	}
 	/// Returns if any changes were made.
 	pub fn update_all_once(&mut self) -> bool {
 		let mut changed = false;
