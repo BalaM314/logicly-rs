@@ -26,8 +26,10 @@ A parser for [logicly](https://logic.ly/) files.
     * [ ] Pull-up
     * [ ] Pull-down
     * [x] Label
-    * [ ] Integrated circuits
+    * [x] Integrated circuits
 * Features
   * [x] Reading .logicly files
   * [ ] Writing to .logicly files
   * [x] Generating truth tables
+  * [x] Custom circuits
+  * [~] Unstable circuits
