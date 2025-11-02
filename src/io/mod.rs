@@ -2,6 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize};
+use uuid::Uuid;
 
 
 
@@ -102,9 +103,14 @@ pub struct Circuit {
 	pub customs: Option<Vec<CustomCircuit>>,
 }
 impl Circuit {
-	fn process_objects(objects: Vec<RawObject>, connections: Vec<RawConnection>) -> Result<Vec<Object>, String> {
+	fn process_objects(
+		objects: Vec<RawObject>,
+		connections: Vec<RawConnection>,
+		customs: &Vec<CustomCircuit>
+	) -> Result<Vec<Object>, String> {
+		let customs: HashMap<_, _> = customs.iter().map(|c| (c.uid.clone(), c)).collect();
 		let mut objects = objects.into_iter()
-			.map(|o| Object::try_from(o))
+			.map(|o| Object::try_from(o, &customs))
 			.collect::<Result<Vec<_>, String>>()?;
 		let uid_to_index: HashMap::<String, usize> = objects.iter().enumerate().map(|(i, o)| (o.uid.clone(), i)).collect();
 		for obj in connections {
@@ -113,7 +119,7 @@ impl Circuit {
 			let input = *uid_to_index.get(&obj.input_uid)
 				.ok_or(String::from("UUID does not correspond to any known object"))?;
 			match &mut objects[input].inner {
-				ObjectInner::SimpleGate { connections, .. } | ObjectInner::Output { connections, .. } =>
+				ObjectInner::SimpleGate { connections, .. } | ObjectInner::CustomGate { connections, .. } | ObjectInner::Output { connections, .. } =>
 					connections[obj.input_index as usize] = Some((obj.output_index, output)),
 				ObjectInner::Input {..} | ObjectInner::Label {..} =>
 					return Err(String::from("Invalid connection: cannot connect an output or a label to something else")),
@@ -140,12 +146,15 @@ pub struct CustomCircuit {
 	pub locations: Vec<Location>,
 }
 
-impl TryFrom<CustomCircuitWrapper> for CustomCircuit {
-	type Error = String;
-	fn try_from(CustomCircuitWrapper { name, uid, label, inner: RawCustomCircuit { objects, connections, locations } }: CustomCircuitWrapper) -> Result<Self, Self::Error> {
+impl CustomCircuit {
+	fn try_from(CustomCircuitWrapper {
+		name, uid, label, inner: RawCustomCircuit {
+			objects, connections, locations
+		}
+	}: CustomCircuitWrapper, customs: &Vec<CustomCircuit>) -> Result<Self, String> {
 		Ok(Self {
 			name, uid, label, locations,
-			objects: Circuit::process_objects(objects, connections)?,
+			objects: Circuit::process_objects(objects, connections, customs)?,
 		})
 	}
 }
@@ -208,15 +217,15 @@ impl Display for Object {
 		}
 		match &self.inner {
 			ObjectInner::SimpleGate { kind, connections, .. } => write!(f, "Gate {kind} [{}]", print_connections(connections)),
+			ObjectInner::CustomGate { uuid, connections, .. } => write!(f, "CustomGate {uuid} [{}]", print_connections(connections)),
 			ObjectInner::Output { export_name, connections } => write!(f, "Output({}) {}", export_name.clone().unwrap_or("?".to_string()), print_connections(connections)),
 			ObjectInner::Input { export_name, kind, value } => write!(f, "Input({}) {kind} {value}", export_name.clone().unwrap_or("?".to_string())),
 			ObjectInner::Label { text } => write!(f, "Label: {text}"),
 		}
 	}
 }
-impl TryFrom<RawObject> for Object {
-	type Error = String;
-	fn try_from(value: RawObject) -> Result<Self, Self::Error> {
+impl Object {
+	fn try_from(value: RawObject, customs: &HashMap<String, &CustomCircuit>) -> Result<Self, String> {
 		Ok(match &value.kind[..] {
 			"switch@logic.ly" | "push_button@logic.ly" | "constant_high@logic.ly" | "constant_low@logic.ly" => match value {
 				RawObject { kind, uid, x, y, rotation, export_name, outputs, inputs: None, text: None, function_index: None } => Self {
@@ -273,7 +282,24 @@ impl TryFrom<RawObject> for Object {
 						},
 					}
 				},
-				_ => return Err(format!("Invalid label")),
+				_ => return Err(format!("Invalid gate: attributes are invalid")),
+			},
+			uuid if Uuid::try_parse(uuid).is_ok() => match value {
+				RawObject { uid, x, y, rotation, export_name: None, outputs: None, inputs: None, text: None, .. } => Self {
+					inner: {
+						let gate = customs.get(uuid).ok_or(format!("Unknown custom circuit {uid}"))?;
+						let num_inputs = gate.objects.iter().filter(|o| o.is_named_input()).count();
+						let num_outputs = gate.objects.iter().filter(|o| o.is_named_output()).count() as u32;
+						ObjectInner::CustomGate {
+							connections: vec![None; num_inputs as usize],
+							num_outputs,
+							uuid: uuid.to_string(),
+						}
+					},
+					uid, x, y,
+					rotation: rotation.try_into()?,
+				},
+				_ => return Err(format!("Invalid label: attributes are invalid, {value:?}")),
 			},
 			x => return Err(format!("Unsupported object type {x}"))
 		})
@@ -284,6 +310,11 @@ pub enum ObjectInner {
 	SimpleGate {
 		xor_type: XorType,
 		kind: SimpleGateType,
+		connections: Vec<Option<(u32, usize)>>,
+	},
+	CustomGate {
+		uuid: String,
+		num_outputs: u32,
 		connections: Vec<Option<(u32, usize)>>,
 	},
 	Output {
@@ -371,13 +402,23 @@ pub enum XorType {
 impl TryFrom<RawCircuit> for Circuit {
 	type Error = String;
 	fn try_from(RawCircuit { connections, customs, objects, .. }: RawCircuit) -> Result<Self, Self::Error> {
-		let objects = Circuit::process_objects(objects, connections)?;
+		let customs: Option<Vec<CustomCircuit>> = match customs {
+			Some(c) => {
+				let mut customs = vec![];
+				for custom in c {
+					//todo! support other orders, currently circuits must be after all their dependencies
+					customs.push(CustomCircuit::try_from(custom, &customs)?);
+				}
+				Some(customs)
+			},
+			None => None,
+		};
+		let objects = Circuit::process_objects(
+			objects, connections, customs.as_ref().unwrap_or(&vec![])
+		)?;
 		Ok(Self {
 			objects,
-			customs: match customs {
-				Some(c) => Some(c.into_iter().map(CustomCircuit::try_from).collect::<Result<_, _>>()?),
-				None => None,
-			}
+			customs,
 		})
 	}
 }
