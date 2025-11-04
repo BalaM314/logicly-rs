@@ -138,30 +138,36 @@ impl Simulation {
 			ObjectInner::Input { export_name: Some(name), .. } => Some(name.clone()),
 			_ => None,
 		}).collect();
-		input_names.sort();
+		input_names.sort_by(|a, b| b.cmp(a));
 		let mut output_names: Vec<_> = self.objects.iter().flat_map(|o| match &o.inner {
 			ObjectInner::Output { export_name: Some(name), .. } => Some(name.clone()),
 			_ => None,
 		}).collect();
-		output_names.sort();
+		output_names.sort_by(|a, b| b.cmp(a));
 		let mut inputs: HashMap<_, _> = input_names.iter().map(|w| (&w[..], false)).collect();
-		let header = input_names.iter().chain(output_names.iter()).map(|s| &s[..]).collect::<Vec<_>>();
-		let header_str = header.join("|");
-		println!("{}", header_str);
-		println!("{}", "-".repeat(header_str.len()));
+		let header_inp = input_names.iter().map(|s| &s[..]).collect::<Vec<_>>();
+		let header_inp_str = header_inp.join("|");
+		let header_out = output_names.iter().map(|s| &s[..]).collect::<Vec<_>>();
+		let header_out_str = header_out.join("|");
+		println!("{}||{}", header_inp_str, header_out_str);
+		println!("{}", "-".repeat(header_inp_str.len() + 2 + header_out_str.len()));
 		for i in 0..2u32.pow(input_names.len() as u32) {
 			for (bit_n, input) in input_names.iter().rev().enumerate() {
 				let value = (i >> bit_n) & 1 == 1;
 				inputs.insert(&input[..], value);	
 			}
 			let outputs = self.get_outputs(&inputs, limit);
-			let line = input_names.iter().map(|inp| inputs.get(&inp[..]).unwrap()).chain(
-				output_names.iter().map(|out| outputs.get(&out[..]).unwrap())
-			).enumerate().map(|(i, val)| format!("{:^width$}", match val {
-				true => "T",
-				false => "F"
-			}, width = header[i].len())).collect::<Vec<_>>().join("|");
-			println!("{line}");
+			let line_inp = input_names.iter().map(|inp| inputs.get(&inp[..]).unwrap())
+				.enumerate().map(|(i, val)| format!("{:^width$}", match val {
+					true => "T",
+					false => "F"
+				}, width = header_inp[i].len())).collect::<Vec<_>>().join("|");
+			let line_out = output_names.iter().map(|out| outputs.get(&out[..]).unwrap())
+				.enumerate().map(|(i, val)| format!("{:^width$}", match val {
+					true => "T",
+					false => "F"
+				}, width = header_out[i].len())).collect::<Vec<_>>().join("|");
+			println!("{line_inp}||{line_out}");
 		}
 	}
 	fn get_values(connections: &Vec<Option<(u32, usize)>>, objects: &Vec<SObject>) -> Vec<bool> {
