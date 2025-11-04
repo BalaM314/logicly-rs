@@ -1,8 +1,9 @@
 #![allow(dead_code)]
+#![allow(non_upper_case_globals)]
 use anyhow::{Context, Result, anyhow};
 use std::{env::args, fs::File, io::Read};
 
-use crate::{io::parse_xml, simul::Simulation, util::{bits_to_int, int_to_bits}};
+use crate::{io::parse_xml, simul::Simulation};
 
 mod io;
 mod simul;

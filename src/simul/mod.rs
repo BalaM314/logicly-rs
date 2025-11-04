@@ -1,7 +1,8 @@
 use std::{collections::HashMap, fmt::Display, ops::Deref};
 use crate::{io::{Circuit, InputType, Object, ObjectInner, SimpleGateType, XorType}, util::*};
 
-type CustomCircuitMap = HashMap<String, (Simulation, Option<Vec<Box<[bool]>>>)>;
+type TruthTable = Vec<Box<[bool]>>;
+type CustomCircuitMap = HashMap<String, (Simulation, Option<TruthTable>)>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Simulation {
@@ -14,8 +15,8 @@ impl From<Circuit> for Simulation {
 		let mut customs:CustomCircuitMap = HashMap::with_capacity(customs_list.len());
 		for custom in customs_list {
 			let mut simulation = Simulation::from(custom.objects, customs.clone());
-			let truth_table = if simulation.inputs_mut().count() > 20 { None }
-			else { simulation.get_truth_table(100) }; //todo! magic
+			let truth_table = if simulation.inputs_mut().count() > Simulation::truth_table_max_length { None }
+			else { simulation.get_truth_table(Simulation::truth_table_max_iterations) };
 			customs.insert(custom.uid, (simulation, truth_table));
 		}
 		Self {
@@ -25,6 +26,8 @@ impl From<Circuit> for Simulation {
 	}
 }
 impl Simulation {
+	const truth_table_max_length: usize = 24; //max 1Mb per table
+	const truth_table_max_iterations: u128 = 1000; //max 1000 iterations per table
 	fn from(objects: Vec<Object>, customs: CustomCircuitMap) -> Self {
 		Self {
 			objects: objects.into_iter().map(SObject::from).collect(),
@@ -119,7 +122,7 @@ impl Simulation {
 		}).collect()
 	}
 	/// Returns None if the circuit fails to stabilize for any combination of inputs.
-	pub fn get_truth_table(&mut self, cycle_limit: u128) -> Option<Vec<Box<[bool]>>> {
+	pub fn get_truth_table(&mut self, cycle_limit: u128) -> Option<TruthTable> {
 		let len = self.inputs_mut().count();
 		(0..2u32.pow(len as u32)).map(|row_index| {
 			self.reset_state();
