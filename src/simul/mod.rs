@@ -54,7 +54,7 @@ impl Simulation {
 		}
 		map
 	}
-	pub fn inputs_mut(&mut self) -> impl Iterator<Item = &mut SObject> {
+	pub fn inputs_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut SObject> {
 		self.objects.iter_mut().flat_map(|o| match &mut o.object.inner {
 			ObjectInner::Input { export_name: Some(_), .. } => Some(o),
 			_ => None
@@ -123,7 +123,7 @@ impl Simulation {
 		let len = self.inputs_mut().count();
 		(0..2u32.pow(len as u32)).map(|row_index| {
 			self.reset_state();
-			for (bit, obj) in self.inputs_mut().enumerate() {
+			for (bit, obj) in self.inputs_mut().rev().enumerate() {
 				obj.values[0] = (row_index >> bit) & 1 == 1;
 			}
 			self.update_until_done(cycle_limit);
