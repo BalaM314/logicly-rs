@@ -1,6 +1,8 @@
-use std::{collections::HashMap, fmt::Display};
+use std::collections::{HashMap, HashSet};
+use std::fmt::Display;
 
 use anyhow::{anyhow, Result};
+use itertools::Itertools;
 use serde::{Deserialize};
 use uuid::Uuid;
 
@@ -22,7 +24,7 @@ pub struct RawCircuit {
 	customs: Option<Vec<CustomCircuitWrapper>>,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct RawObject {
 	#[serde(rename = "@type")]
 	kind: String,
@@ -46,7 +48,7 @@ pub struct RawObject {
 	function_index: Option<u8>
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct RawConnection {
 	#[serde(rename = "@inputUID")]
 	input_uid: String,
@@ -68,7 +70,7 @@ pub struct Setting {
 	value: String,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct CustomCircuitWrapper {
 	#[serde(rename = "@name")]
 	name: String,
@@ -80,7 +82,7 @@ pub struct CustomCircuitWrapper {
 	inner: RawCustomCircuit,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct RawCustomCircuit {
 	#[serde(rename = "object")]
 	objects: Vec<RawObject>,
@@ -90,7 +92,7 @@ pub struct RawCustomCircuit {
 	locations: Vec<Location>,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct Location {
 	#[serde(rename = "@id")]
 	id: String,
@@ -100,6 +102,8 @@ pub struct Location {
 #[derive(Debug, PartialEq)]
 pub struct Circuit {
 	pub objects: Vec<Object>,
+	/// If present, the circuits must be in a valid dependency order,
+	/// so that all circuits must come after their dependencies.
 	pub customs: Option<Vec<CustomCircuit>>,
 }
 impl Circuit {
@@ -404,9 +408,9 @@ impl TryFrom<RawCircuit> for Circuit {
 	fn try_from(RawCircuit { connections, customs, objects, .. }: RawCircuit) -> Result<Self, Self::Error> {
 		let customs: Option<Vec<CustomCircuit>> = match customs {
 			Some(c) => {
+				let c = order_dependency_graph(c)?;
 				let mut customs = vec![];
 				for custom in c {
-					//todo! support other orders, currently circuits must be after all their dependencies
 					customs.push(CustomCircuit::try_from(custom, &customs)?);
 				}
 				Some(customs)
@@ -421,6 +425,76 @@ impl TryFrom<RawCircuit> for Circuit {
 			customs,
 		})
 	}
+}
+
+pub fn order_dependency_graph(items: Vec<CustomCircuitWrapper>) -> Result<Vec<CustomCircuitWrapper>, String> {
+	let mut items_deps: Vec<_> = items.into_iter().map(|item|{
+		let deps: HashSet<_> = item.inner.objects.iter().filter_map(|o| match Uuid::try_parse(&o.kind) {
+			Ok(_) => Some(o.kind.clone()),
+			Err(_) => None
+		}).collect();
+		Some((item, deps))
+	}).collect();
+	// let mapping: HashMap<_, _> = items.iter().enumerate().map(|(i, x)| (&x.uid[..], i)).collect();
+	let mut output = Vec::with_capacity(items_deps.len());
+	//O(n^2) toposort
+	while output.len() != output.capacity() {
+		let mut i = 0;
+		let mut removed_any = false;
+		while i < items_deps.len() {
+			if let Some((_, deps)) = &items_deps[i] {
+				if deps.is_empty() {
+					removed_any = true;
+					let (removed, _) = items_deps[i].take().unwrap();
+					for x in items_deps.iter_mut() {
+						if let Some((_, deps)) = x {
+							deps.remove(&removed.uid);
+						}
+					}
+					output.push(removed);
+				}
+			}
+			i += 1;
+		}
+		if !removed_any {
+			//Find the dependency cycle
+			let mut edges: Vec<&String> = vec![];
+			let mut i = 0;
+			let mut updated = false;
+			loop {
+				if let Some((item, deps)) = &items_deps[i] {
+					if let Some((j, _)) = edges.iter().enumerate().find(|(i, x)| ***x == item.uid) {
+						let mut cycle = edges[j..].to_vec();
+						cycle.push(&item.uid);
+						return Err(format!("Circuit contains a dependency cycle: {}", cycle.iter().join(" -> ")));
+					}
+					if deps.contains(&item.uid) {
+						return Err(format!("Circuit contains a dependency cycle: {} -> {}", item.uid, item.uid));
+					}
+					edges.push(&item.uid);
+					updated = true;
+					if let Some((next_i, _)) = items_deps.iter().enumerate().find(|(i, x)|
+						x.as_ref().is_some_and(|(y, _)| y.uid == *deps.iter().next().unwrap())
+					) {
+						if i == next_i {
+							return Err(format!("Circuit contains a dependency cycle: {} -> {}", item.uid, item.uid));
+						}
+						i = next_i;
+					} else {
+						return Err(format!("Circuit contains a dependency cycle: failed to find it"));
+					}
+				}
+				if i >= items_deps.len() {
+					if !updated {
+						return Err(format!("Circuit contains a dependency cycle: failed to find it"));
+					}
+					i = 0;
+					updated = false;
+				}
+			}
+		}
+	}
+	Ok(output)
 }
 
 pub fn parse_xml(input:&str) -> Result<Circuit> {
