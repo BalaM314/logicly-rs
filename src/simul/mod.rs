@@ -1,7 +1,16 @@
 use std::{collections::HashMap, fmt::Display, ops::Deref};
 use crate::{io::{Circuit, InputType, Object, ObjectInner, SimpleGateType, XorType}, util::*};
 
-type TruthTable = Vec<Box<[bool]>>;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TruthTable {
+	data: Vec<bool>,
+	row_size: usize
+}
+impl TruthTable {
+	pub fn get_row(&self, row: usize) -> &[bool] {
+		&self.data[row * self.row_size..(row+1) * self.row_size]
+	}
+}
 type CustomCircuitMap = HashMap<String, (Simulation, Option<TruthTable>)>;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -81,10 +90,12 @@ impl Simulation {
 		}
 		changed
 	}
-	pub fn update_until_done(&mut self, limit: u128){
+	/// Returns true if the update was successful, and false if the limit was reached.
+	pub fn update_until_done(&mut self, limit: u128) -> bool {
 		for _ in 1..limit {
-			if !self.update_all_once() { break }
+			if !self.update_all_once() { return true; }
 		}
+		false
 	}
 	/// Sets all non-constant objects to false.
 	pub fn reset_state(&mut self){
@@ -124,17 +135,25 @@ impl Simulation {
 	/// Returns None if the circuit fails to stabilize for any combination of inputs.
 	pub fn get_truth_table(&mut self, cycle_limit: u128) -> Option<TruthTable> {
 		let len = self.inputs_mut().count();
-		(0..2u32.pow(len as u32)).map(|row_index| {
+		let row_len = self.objects.iter().flat_map(|f| match &f.inner {
+			ObjectInner::Output { export_name: Some(_), .. } => Some(()),
+			_ => None
+		}).count();
+		let mut buf: Vec<bool> = Vec::with_capacity(row_len * 2usize.pow(len as u32));
+		for row_index in 0..2u32.pow(len as u32) {
 			self.reset_state();
 			for (bit, obj) in self.inputs_mut().rev().enumerate() {
 				obj.values[0] = (row_index >> bit) & 1 == 1;
 			}
-			self.update_until_done(cycle_limit);
-			Some(self.objects.iter().flat_map(|f| match &f.inner {
-				ObjectInner::Output { export_name: Some(_), .. } => Some(f.values[0]),
-				_ => None
-			}).collect())
-		}).collect()
+			if !self.update_until_done(cycle_limit) { return None }
+			buf.extend(
+				self.objects.iter().flat_map(|f| match &f.inner {
+					ObjectInner::Output { export_name: Some(_), .. } => Some(f.values[0]),
+					_ => None
+				})
+			);
+		}
+		Some(TruthTable { data: buf, row_size: row_len })
 	}
 	pub fn print_truth_table(&mut self, limit: u128){
 		let mut input_names: Vec<_> = self.objects.iter().flat_map(|o| match &o.inner {
@@ -239,7 +258,7 @@ impl SObject {
 				match table {
 					Some(table) => {
 						let packed_inputs = bits_to_int(inputs.iter());
-						table[packed_inputs].to_vec()
+						table.get_row(packed_inputs).to_vec()
 					},
 					None => todo!(),
 				}
