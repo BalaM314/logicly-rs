@@ -501,3 +501,109 @@ pub fn parse_xml(input:&str) -> Result<Circuit> {
 	let raw: RawCircuit = serde_xml_rs::from_str(input)?;
 	Circuit::try_from(raw).map_err(|e| anyhow!(e))
 }
+
+#[cfg(test)]
+mod tests {
+	use crate::io::*;
+
+	fn name_to_uuid(name: &str) -> Uuid {
+		let mut name = name.as_bytes().to_vec();
+		name.resize(16, 0);
+		Uuid::from_bytes(name.try_into().unwrap())
+	}
+	fn make_circuit(name: &'static str, deps: Vec<&'static str>) -> CustomCircuitWrapper {
+		CustomCircuitWrapper {
+			label: String::from(""),
+			uid: name_to_uuid(name).to_string(),
+			name: name.to_string(),
+			inner: RawCustomCircuit {
+				objects: deps.into_iter().map(|s| RawObject {
+					kind: name_to_uuid(s).to_string(),
+					uid: Uuid::new_v4().to_string(),
+					x: 0.,
+					y: 0.,
+					rotation: 0,
+					export_name: None,
+					outputs: None,
+					inputs: None,
+					text: None,
+					function_index: None,
+				}).collect(),
+				connections: vec![],
+				locations: vec![]
+			}
+		}
+	}
+	#[test]
+	fn orderdeps_ordered_1(){
+		let a = make_circuit("a", vec![]);
+		let b = make_circuit("b", vec![]);
+		let c = make_circuit("c", vec![]);
+		let d = make_circuit("d", vec![]);
+		let deps = vec![a, b, c, d];
+		assert_eq!(order_dependency_graph(deps.clone()), Ok(deps));
+	}
+	#[test]
+	fn orderdeps_ordered_2(){
+		let a = make_circuit("a", vec![]);
+		let b = make_circuit("b", vec!["a"]);
+		let c = make_circuit("c", vec!["b"]);
+		let d = make_circuit("d", vec!["c"]);
+		let deps = vec![a, b, c, d];
+		assert_eq!(order_dependency_graph(deps.clone()), Ok(deps));
+	}
+	#[test]
+	fn orderdeps_ordered_3(){
+		let a = make_circuit("a", vec![]);
+		let b = make_circuit("b", vec!["a"]);
+		let c = make_circuit("c", vec!["a", "b"]);
+		let d = make_circuit("d", vec!["b", "c"]);
+		let deps = vec![a, b, c, d];
+		assert_eq!(order_dependency_graph(deps.clone()), Ok(deps));
+	}
+	#[test]
+	fn orderdeps_reorder_1(){
+		let a = make_circuit("a", vec!["c"]);
+		let b = make_circuit("b", vec![]);
+		let c = make_circuit("c", vec!["b"]);
+		let d = make_circuit("d", vec![]);
+		let e = make_circuit("e", vec!["b"]);
+		let deps = vec![a.clone(), b.clone(), c.clone(), d.clone(), e.clone()];
+		assert_eq!(order_dependency_graph(deps.clone()), Ok(vec![b, c, d, e, a]));
+	}
+	#[test]
+	fn orderdeps_reorder_2(){
+		let a = make_circuit("a", vec!["c", "e"]);
+		let b = make_circuit("b", vec!["d", "c"]);
+		let c = make_circuit("c", vec![]);
+		let d = make_circuit("d", vec!["c"]);
+		let e = make_circuit("e", vec!["b"]);
+		let deps = vec![a.clone(), b.clone(), c.clone(), d.clone(), e.clone()];
+		assert_eq!(order_dependency_graph(deps.clone()), Ok(vec![c, d, b, e, a]));
+	}
+	#[test]
+	fn orderdeps_cycle_1(){
+		let a = make_circuit("a", vec!["a"]);
+		let deps = vec![a.clone()];
+		assert_eq!(order_dependency_graph(deps.clone()), Err(format!("Circuit contains a dependency cycle: {} -> {}", a.uid, a.uid)));
+	}
+	#[test]
+	fn orderdeps_cycle_2(){
+		let a = make_circuit("a", vec!["b"]);
+		let b = make_circuit("b", vec!["a"]);
+		let deps = vec![a.clone(), b.clone()];
+		assert_eq!(order_dependency_graph(deps.clone()), Err(format!("Circuit contains a dependency cycle: {} -> {} -> {}", a.uid, b.uid, a.uid)));
+	}
+	#[test]
+	fn orderdeps_cycle_3(){
+		let a = make_circuit("a", vec!["b"]);
+		let b = make_circuit("b", vec!["c"]);
+		let c = make_circuit("c", vec!["d"]);
+		let d = make_circuit("d", vec!["a"]);
+		let deps = vec![d.clone(), c.clone(), b.clone(), a.clone()];
+		assert_eq!(order_dependency_graph(deps.clone()), Err(format!(
+			"Circuit contains a dependency cycle: {} -> {} -> {} -> {} -> {}",
+			d.uid, a.uid, b.uid, c.uid, d.uid
+		)));
+	}
+}
