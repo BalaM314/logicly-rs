@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, ops::Deref};
+use std::{collections::HashMap, fmt::Display, ops::{Deref, Index}};
 use crate::{io::{Circuit, InputType, Object, ObjectInner, SimpleGateType, XorType}, util::*};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -6,8 +6,9 @@ pub struct TruthTable {
 	data: Vec<bool>,
 	row_size: usize
 }
-impl TruthTable {
-	pub fn get_row(&self, row: usize) -> &[bool] {
+impl Index<usize> for TruthTable {
+	type Output = [bool];
+	fn index(&self, row: usize) -> &[bool] {
 		&self.data[row * self.row_size..(row+1) * self.row_size]
 	}
 }
@@ -258,7 +259,7 @@ impl SObject {
 				match table {
 					Some(table) => {
 						let packed_inputs = bits_to_int(inputs.iter());
-						table.get_row(packed_inputs).to_vec()
+						table[packed_inputs].to_vec()
 					},
 					None => todo!(),
 				}

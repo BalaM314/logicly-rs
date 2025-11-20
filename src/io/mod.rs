@@ -463,7 +463,7 @@ pub fn order_dependency_graph(items: Vec<CustomCircuitWrapper>) -> Result<Vec<Cu
 			let mut updated = false;
 			loop {
 				if let Some((item, deps)) = &items_deps[i] {
-					if let Some((j, _)) = edges.iter().enumerate().find(|(i, x)| ***x == item.uid) {
+					if let Some((j, _)) = edges.iter().enumerate().find(|(_, x)| ***x == item.uid) {
 						let mut cycle = edges[j..].to_vec();
 						cycle.push(&item.uid);
 						return Err(format!("Circuit contains a dependency cycle: {}", cycle.iter().join(" -> ")));
@@ -473,7 +473,7 @@ pub fn order_dependency_graph(items: Vec<CustomCircuitWrapper>) -> Result<Vec<Cu
 					}
 					edges.push(&item.uid);
 					updated = true;
-					if let Some((next_i, _)) = items_deps.iter().enumerate().find(|(i, x)|
+					if let Some((next_i, _)) = items_deps.iter().enumerate().find(|(_, x)|
 						x.as_ref().is_some_and(|(y, _)| y.uid == *deps.iter().next().unwrap())
 					) {
 						if i == next_i {
