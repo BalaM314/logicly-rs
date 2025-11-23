@@ -437,11 +437,12 @@ pub fn order_dependency_graph(items: Vec<CustomCircuitWrapper>) -> Result<Vec<Cu
 	}).collect();
 	// let mapping: HashMap<_, _> = items.iter().enumerate().map(|(i, x)| (&x.uid[..], i)).collect();
 	let mut output = Vec::with_capacity(items_deps.len());
-	//O(n^2) toposort
+	//O(E*V) toposort
+	//Could be fixed by fliping the edges,
+	//but this will probably run in O(E) time anyway
 	while output.len() != output.capacity() {
-		let mut i = 0;
 		let mut removed_any = false;
-		while i < items_deps.len() {
+		for i in 0..items_deps.len() {
 			if let Some((_, deps)) = &items_deps[i] {
 				if deps.is_empty() {
 					removed_any = true;
@@ -454,7 +455,6 @@ pub fn order_dependency_graph(items: Vec<CustomCircuitWrapper>) -> Result<Vec<Cu
 					output.push(removed);
 				}
 			}
-			i += 1;
 		}
 		if !removed_any {
 			//Find the dependency cycle
